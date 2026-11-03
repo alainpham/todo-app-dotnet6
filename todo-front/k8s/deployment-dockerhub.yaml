@@ -1,0 +1,71 @@
+# Namespace "apps" is created by ../../deploy.sh (not here, so `kubectl delete -f` never removes a shared namespace)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-front
+  namespace: apps
+  labels:
+    app: todo-front
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: todo-front
+  template:
+    metadata:
+      labels:
+        app: todo-front
+      annotations:
+        # OpenTelemetry Operator injects .NET auto-instrumentation (Instrumentation CR from otelcoloperator.sh, agent 1.9.0 for .NET 6)
+        instrumentation.opentelemetry.io/inject-dotnet: "opentelemetry-operator-system/otel-instrumentation"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: todo-front
+          image: alainpham/todo-front:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 7123
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: TODO_STORE_URL
+              value: http://todo-store
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: todo-front
+  namespace: apps
+  labels:
+    app: todo-front
+spec:
+  type: ClusterIP
+  selector:
+    app: todo-front
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

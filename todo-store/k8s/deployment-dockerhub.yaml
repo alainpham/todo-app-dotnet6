@@ -1,0 +1,69 @@
+# Deployed into the apps namespace (created by ../../deploy.sh)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-store
+  namespace: apps
+  labels:
+    app: todo-store
+spec:
+  replicas: 1   # in-memory store: more replicas would each hold a separate todo list
+  selector:
+    matchLabels:
+      app: todo-store
+  template:
+    metadata:
+      labels:
+        app: todo-store
+      annotations:
+        # OpenTelemetry Operator injects .NET auto-instrumentation (Instrumentation CR from otelcoloperator.sh, agent 1.9.0 for .NET 6)
+        instrumentation.opentelemetry.io/inject-dotnet: "opentelemetry-operator-system/otel-instrumentation"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: todo-store
+          image: alainpham/todo-store:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 7124
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: todo-store
+  namespace: apps
+  labels:
+    app: todo-store
+spec:
+  type: ClusterIP
+  selector:
+    app: todo-store
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

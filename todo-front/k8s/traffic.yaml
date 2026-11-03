@@ -1,0 +1,56 @@
+# Synthetic traffic: every 5s create a todo through todo-front, and delete the one created 5s earlier.
+# Requests go through the todo-front Service, so each one exercises todo-front -> todo-store.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-front-traffic
+  namespace: apps
+  labels:
+    app: todo-front-traffic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: todo-front-traffic
+  template:
+    metadata:
+      labels:
+        app: todo-front-traffic
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+      containers:
+        - name: traffic
+          image: curlimages/curl:8.10.1
+          env:
+            - name: TARGET
+              value: http://todo-front
+            - name: INTERVAL_SECONDS
+              value: "5"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              trap 'exit 0' TERM INT
+              prev=""
+              while true; do
+                id=$(curl -sf -m 4 -X POST "$TARGET/api/todos" -H 'Content-Type: application/json' \
+                       -d "{\"title\":\"traffic $(date -u +%H:%M:%S)\"}" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+                echo "$(date -u +%FT%TZ) created ${id:-FAILED}"
+                if [ -n "$prev" ]; then
+                  if curl -sf -m 4 -o /dev/null -X DELETE "$TARGET/api/todos/$prev"; then
+                    echo "$(date -u +%FT%TZ) deleted $prev"
+                  else
+                    echo "$(date -u +%FT%TZ) delete $prev FAILED"
+                  fi
+                fi
+                prev=$id
+                sleep "$INTERVAL_SECONDS" & wait $!
+              done
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
